@@ -16,6 +16,26 @@ from dipy.reconst.shm import CsaOdfModel
 from dipy.direction import ProbabilisticDirectionGetter
 from dipy.data import small_sphere
 
+from functools import wraps
+from warnings import warn
+
+from nibabel.affines import apply_affine
+from scipy.spatial.distance import cdist
+from numpy import ravel_multi_index
+
+from dipy.core.geometry import dist_to_corner
+
+from collections import defaultdict, OrderedDict
+from itertools import combinations, groupby
+
+import numpy as np
+from numpy import (asarray, ceil, empty, sqrt)
+from dipy.tracking import metrics
+from dipy.tracking.vox2track import _streamlines_in_mask
+
+# Import helper functions shared with vox2track
+from dipy.tracking.utils import (_mapping_to_voxel, _to_voxel_coordinates, ndbincount)
+
 all_labels = np.array([4,5,8,10,11,12,13,14,15,16,17,18,24,26,28,30,31,43,44,47,49,50,51,52,53,54,58,60,62,63,85,251,252,253,254,255,1000,1001,1002,1003,1004,1005,1006,1007,1008,1009,1010,1011,1012,
 1013,1014,1015,1016,1017,1018,1019,1020,1021,1022,1023,1024,1025,1026,1027,1028,1029,1030,1031,1032,1033,1034,1035,2000,2001,2002,2003,2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,
 2020,2021,2022,2023,2024,2025,2026,2027,2028,2029,2030,2031,2032,2033,2034,2035])
@@ -43,14 +63,11 @@ def Analyze(img_d_path,img_s_path,gtab, run, subject):
     # creating the affine matrix for the structural image
     img_s_affine = img_s.affine
 
-    # retrieving the data from the structural image. this is a 4D array (CHECK THIS)
+    # retrieving the data from the structural image. this is a 4D array 
     img_s_data = img_s.get_fdata()
 
-    # retrieving the data from the diffusion image. this is a 3D array (CHECK THIS)
+    # retrieving the data from the diffusion image. this is a 3D array 
     img_d_data = img_d.get_fdata()
-
-    #print(img_s_data.shape)
-    #print(img_d_data.shape)
 
     # making a set of voxel coordinates in the i dimension with the same number of coordinates as the shape of the 3D structural image
     Vox_coord_s_i = np.arange(img_s_shape_3D[0])
@@ -69,9 +86,6 @@ def Analyze(img_d_path,img_s_path,gtab, run, subject):
 
     # using the affine matrix to transform into a list of REFERENCE coordinates in the k dimension
     Ref_coord_s_k = Vox_coord_s_k * img_s_affine[2,2] + img_s_affine[2,3]
-
-    #print(img_s_affine[0,3], img_s_affine[1,3], img_s_affine[2,3]) # 90.0, -126.0, -72.0
-    #print(img_d_affine[0,3], img_d_affine[1,3], img_d_affine[2,3]) # 90.0, -126.0, -72.0
 
     # making an empty array with the same shape as the 
     reduced_size_label = np.zeros(img_d_shape_3D)
@@ -207,25 +221,26 @@ def Analyze(img_d_path,img_s_path,gtab, run, subject):
 
     labels = np.array(reduced_size_label, dtype=int)
 
-    connectivity = utils.connectivity_matrix(streamlines_generator, img_d_affine, labels)
+    connectivity = connectivity_matrix(streamlines_generator, img_d_affine, labels)
+
+    np.savetxt('/Volumes/Toshiba4TB/connectivity_matrix_test_mar24.csv', connectivity, delimiter=' ', fmt='%s')
+        
+    print('Connectivity matrix complete')
 
     np.savetxt('/Volumes/Toshiba4TB/' + subject + 'connectivity_matrix_function_subject_' + subject.split(None,1)[0] + '.csv', connectivity, delimiter=',')
 
     # making a numpy array of ednpoints based on the streamlines. 
     endpoints = np.array([st[0::len(st) - 1] for st in astreamlines if len(st) > 1] )
 
-    density = utils.density_map(astreamlines, img_d_affine, (260,311,260))
+    print('Endpoints complete')
 
-    endpoints_title = '/Volumes/Toshiba4TB/' + subject + 'endpoints_maxangle=45_gfa=0.25_subject=' + subject.split(None, 1)[0] + run + '.pkl'
-    reduced_label_title = '/Volumes/Toshiba4TB/' + subject + 'labels_maxangle=45_gfa=0.25_subject=' + subject.split(None, 1)[0] + run + '.pkl'
-    density_title = '/Volumes/Toshiba4TB/' + subject + 'density_map_maxangle=45_gfa=0.25_subject=' + subject.split(None, 1)[0] + run + '.pkl'
+    endpoints_title = '/Volumes/Toshiba4TB/' + subject + 'endpoints_originaltest_subject=' + subject.split(None, 1)[0] + run + '.pkl'
+    reduced_label_title = '/Volumes/Toshiba4TB/' + subject + 'labels_originaltest_gfa=0.25_subject=' + subject.split(None, 1)[0] + run + '.pkl'
     
     with open(endpoints_title,'wb') as f:
         pickle.dump(endpoints,f)
     with open(reduced_label_title,"wb") as g:
         pickle.dump(reduced_size_label,g)
-    with open(density_title, 'wb') as h:
-        pickle.dump(density, h)
 
 # an array with labels for each run (each subject will be run three times)
 p = ["_run1", "_run2", "_run3"] 
